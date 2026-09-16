@@ -10,6 +10,12 @@ services:
       - ./index.php:/var/www/html/index.php
       - ./style.css:/var/www/html/style.css
 
+      - ./drawer.php:/var/www/html/drawer.php
+      - ./drawer_logic.php:/var/www/html/drawer_logic.php
+
+      - ./sort_shell.php:/var/www/html/sort_shell.php
+      - ./sort.php:/var/www/html/sort.php
+
   db:
     image: mysql:8.4
     environment:
