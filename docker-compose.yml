@@ -7,14 +7,8 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./index.php:/var/www/html/index.php
-      - ./style.css:/var/www/html/style.css
-
-      - ./drawer.php:/var/www/html/drawer.php
-      - ./drawer_logic.php:/var/www/html/drawer_logic.php
-
-      - ./sort_shell.php:/var/www/html/sort_shell.php
-      - ./sort.php:/var/www/html/sort.php
+      # Монтируем всю текущую папку в корень веб-сервера
+      - ./:/var/www/html
 
   db:
     image: mysql:8.4
@@ -25,6 +19,7 @@ services:
       MYSQL_PASSWORD: password
     volumes:
       - db_data:/var/lib/mysql
+      # Автоматическая инициализация БД при первом запуске
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpassword"]

@@ -4,39 +4,31 @@ GRANT SELECT,UPDATE,INSERT ON appDB.* TO 'user'@'%';
 FLUSH PRIVILEGES;
 
 USE appDB;
-CREATE TABLE IF NOT EXISTS users (
-  ID INT(11) NOT NULL AUTO_INCREMENT,
-  name VARCHAR(20) NOT NULL,
-  surname VARCHAR(40) NOT NULL,
-  PRIMARY KEY (ID)
+
+-- Сущность 1: Пользователи
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL
 );
 
-INSERT INTO users (name, surname)
-SELECT * FROM (SELECT 'Alex', 'Rover') AS tmp
-WHERE NOT EXISTS (
-    SELECT name FROM users WHERE name = 'Alex' AND surname = 'Rover'
-) LIMIT 1;
+-- Сущность 2: Заказы (связана с users через user_id)
+CREATE TABLE orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    product_name VARCHAR(255) NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 
-INSERT INTO users (name, surname)
-SELECT * FROM (SELECT 'Bob', 'Marley') AS tmp
-WHERE NOT EXISTS (
-    SELECT name FROM users WHERE name = 'Bob' AND surname = 'Marley'
-) LIMIT 1;
+-- Добавляем тестовые данные
+INSERT INTO users (name, email, password) VALUES
+('Иван Иванов', 'ivan@example.com', 'password123'),
+('Петр Петров', 'petr@example.com', 'password456');
 
-INSERT INTO users (name, surname)
-SELECT * FROM (SELECT 'Alex', 'Rover') AS tmp
-WHERE NOT EXISTS (
-    SELECT name FROM users WHERE name = 'Alex' AND surname = 'Rover'
-) LIMIT 1;
-
-INSERT INTO users (name, surname)
-SELECT * FROM (SELECT 'Kate', 'Yandson') AS tmp
-WHERE NOT EXISTS (
-    SELECT name FROM users WHERE name = 'Kate' AND surname = 'Yandson'
-) LIMIT 1;
-
-INSERT INTO users (name, surname)
-SELECT * FROM (SELECT 'Lilo', 'Black') AS tmp
-WHERE NOT EXISTS (
-    SELECT name FROM users WHERE name = 'Lilo' AND surname = 'Black'
-) LIMIT 1;
+INSERT INTO orders (user_id, product_name, amount) VALUES
+(1, 'Ноутбук', 50000.00),
+(1, 'Мышь', 1500.00),
+(2, 'Монитор', 20000.00);
