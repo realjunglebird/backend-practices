@@ -1,81 +1,146 @@
 <?php
-// Устанавливаем заголовок ответа в формате JSON
 header('Content-Type: application/json; charset=utf-8');
+require_once 'db.php';
 
-// Настройки подключения к БД
-$host = 'db';
-$db   = 'appDB';
-$user = 'user';
-$pass = 'password';
-$charset = 'utf8mb4';
+/** @var mysqli $conn */
+$method = $_SERVER['REQUEST_METHOD'];
+$id = isset($_GET['id']) ? (int)$_GET['id'] : null;
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
-$options = [
-    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    PDO::ATTR_EMULATE_PREPARES   => false,
-];
+#region GET метод
+if ($method === 'GET') {
+    if ($id !== null) {
+        $stmt = $conn->prepare('SELECT * FROM orders WHERE id = ?');
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $order = $result->fetch_assoc();
 
-try {
-    $pdo = new PDO($dsn, $user, $pass, $options);
-} catch (\PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["error" => "Ошибка подключения к БД: " . $e->getMessage()]);
+        if (!$order) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Заказ с переданным ID не найден'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        echo json_encode($order, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $result = $conn->query("SELECT * FROM orders ORDER BY id");
+    $orders = [];
+    while ($row = $result->fetch_assoc()) {
+        $orders[] = $row;
+    }
+    echo json_encode($orders, JSON_UNESCAPED_UNICODE);
     exit;
 }
+#endregion
 
-// Определяем метод HTTP-запроса и читаем тело запроса (для POST/PUT)
-$method = $_SERVER['REQUEST_METHOD'];
-$input = json_decode(file_get_contents('php://input'), true);
+#region POST метод
+if ($method === 'POST') {
+    $data = json_decode(file_get_contents('php://input'), true);
 
-switch ($method) {
-    case 'GET':
-        if (isset($_GET['id'])) {
-            // Получение заказа по ID или списка всех заказов
-            $stmt = $pdo->prepare('SELECT * FROM orders WHERE id = ?');
-            $stmt->execute([$_GET['id']]);
-            $order = $stmt->fetch();
-            echo $order ? json_encode($order) : json_encode(["error" => "Заказ не найден"]);
-        } else {
-            $stmt = $pdo->query('SELECT * FROM orders');
-            echo json_encode($stmt->fetchAll());
-        }
-        break;
+    if (
+        !isset($data['user_id']) ||
+        !isset($data['product_name']) || trim($data['product_name']) === '' ||
+        !isset($data['amount'])
+    ) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Не указаны user_id, product_name или amount'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
-    case 'POST':
-        // Создание нового заказа
-        $stmt = $pdo->prepare('INSERT INTO orders (user_id, product_name, amount) VALUES (?, ?, ?)');
-        $stmt->execute([$input['user_id'], $input['product_name'], $input['amount']]);
-        http_response_code(201);    // 201 Created
-        echo json_encode(["message" => "Заказ создан", "id" => $pdo->lastInsertId()]);
-        break;
+    $user_id = (int)$data['user_id'];
+    $product_name = trim($data['product_name']);
+    $amount = $data['amount']; // Можно привести к (int) или (float) в зависимости от типа в БД
 
-    case 'PUT':
-        // Обновление данных заказа
-        if (isset($_GET['id'])) {
-            $stmt = $pdo->prepare('UPDATE orders SET user_id = ?, product_name = ?, amount = ? WHERE id = ?');
-            $stmt->execute([$input['user_id'], $input['product_name'], $input['amount'], $_GET['id']]);
-            echo json_encode(["message" => "Заказ обновлен"]);
-        } else {
-            http_response_code(400);
-            echo json_encode(["error" => "Не указан ID заказа"]);
-        }
-        break;
+    $stmt = $conn->prepare('INSERT INTO orders (user_id, product_name, amount) VALUES (?, ?, ?)');
+    $stmt->bind_param('isi', $user_id, $product_name, $amount);
+    $stmt->execute();
 
-    case 'DELETE':
-        // Удаление заказа
-        if (isset($_GET['id'])) {
-            $stmt = $pdo->prepare('DELETE FROM orders WHERE id = ?');
-            $stmt->execute([$_GET['id']]);
-            echo json_encode(["message" => "Заказ удален"]);
-        } else {
-            http_response_code(400);
-            echo json_encode(["error" => "Не указан ID заказа"]);
-        }
-        break;
-
-    default:
-        http_response_code(405);
-        echo json_encode(["error" => "Метод не поддерживается"]);
-        break;
+    $newId = $conn->insert_id;
+    http_response_code(201);
+    echo json_encode([
+        'id' => $newId,
+        'user_id' => $user_id,
+        'product_name' => $product_name,
+        'amount' => $amount
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
 }
+#endregion
+
+#region PUT метод
+if ($method === 'PUT') {
+    $data = json_decode(file_get_contents('php://input'), true);
+
+    if ($id === null) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Укажите ID заказа'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (
+        !isset($data['user_id']) ||
+        !isset($data['product_name']) || trim($data['product_name']) === '' ||
+        !isset($data['amount'])
+    ) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Не указаны user_id, product_name или amount'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $user_id = (int)$data['user_id'];
+    $product_name = trim($data['product_name']);
+    $amount = $data['amount'];
+
+    $stmt = $conn->prepare('UPDATE orders SET user_id = ?, product_name = ?, amount = ? WHERE id = ?');
+    $stmt->bind_param('isii', $user_id, $product_name, $amount, $id);
+    $stmt->execute();
+
+    if ($stmt->affected_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Заказ не найден или данные не изменились'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    http_response_code(200);
+    echo json_encode([
+        'id' => $id,
+        'user_id' => $user_id,
+        'product_name' => $product_name,
+        'amount' => $amount
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+#endregion
+
+#region DELETE метод
+if ($method === 'DELETE') {
+    if ($id === null) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Укажите ID заказа'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $stmt = $conn->prepare('DELETE FROM orders WHERE id = ?');
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    if ($stmt->affected_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Заказ не найден'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    echo json_encode([
+        'message' => 'Заказ удален',
+        'id' => $id
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+#endregion
+
+// =========================
+// Неподдерживаемый метод
+// =========================
+http_response_code(405);
+echo json_encode(['error' => 'Метод не поддерживается'], JSON_UNESCAPED_UNICODE);

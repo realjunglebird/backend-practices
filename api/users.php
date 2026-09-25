@@ -1,99 +1,133 @@
 <?php
-// Устанавливаем заголовок ответа в формате JSON
 header('Content-Type: application/json; charset=utf-8');
+require_once 'db.php';
 
-// Настройки подключения к БД
-$host = 'db';
-$db   = 'appDB';
-$user = 'user';
-$pass = 'password';
-$charset = 'utf8mb4';
+/** @var mysqli $conn */
+$method = $_SERVER['REQUEST_METHOD'];
+$id = isset($_GET['id']) ? (int)$_GET['id'] : null;
 
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
-$options = [
-    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    PDO::ATTR_EMULATE_PREPARES   => false,
-];
+#region GET метод
+if ($method === 'GET') {
+    if ($id !== null) {
+        $stmt = $conn->prepare('SELECT id, name, email FROM users WHERE id = ?');
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $user = $result->fetch_assoc();
 
-try {
-    $pdo = new PDO($dsn, $user, $pass, $options);
-} catch (\PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["error" => "Ошибка подключения к БД: " . $e->getMessage()]);
+        if (!$user) {
+            http_response_code(404);
+            echo json_encode(['error' => 'Пользователь с переданным ID не найден'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        echo json_encode($user, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $result = $conn->query("SELECT id, name, email FROM users ORDER BY id");
+    $users = [];
+    while ($row = $result->fetch_assoc()) {
+        $users[] = $row;
+    }
+    echo json_encode($users, JSON_UNESCAPED_UNICODE);
     exit;
 }
+#endregion
 
-// Определяем метод HTTP-запроса и читаем тело запроса (для POST/PUT)
-$method = $_SERVER['REQUEST_METHOD'];
-$input = json_decode(file_get_contents('php://input'), true);
+#region POST метод
+if ($method === 'POST') {
+    $data = json_decode(file_get_contents('php://input'), true);
 
-switch ($method) {
-    case 'GET':
-        // Получение пользователя по ID или списка всех пользователей
-        if (isset($_GET['id'])) {
-            $stmt = $pdo->prepare('SELECT id, name, email FROM users WHERE id = ?');
-            $stmt->execute([$_GET['id']]);
-            $userData = $stmt->fetch();
-            // пароль намеренно не возвращается в GET-запросах в целях безопасности
-            echo $userData ? json_encode($userData) : json_encode(["error" => "Пользователь не найден"]);
-        } else {
-            $stmt = $pdo->query('SELECT id, name, email FROM users');
-            echo json_encode($stmt->fetchAll());
+    if (!isset($data['name']) || trim($data['name']) === '' ||
+        !isset($data['email']) || trim($data['email']) === '' ||
+        !isset($data['password']) || trim($data['password']) === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Не указаны name, email или password'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $name = trim($data['name']);
+    $email = trim($data['email']);
+    $password = trim($data['password']);
+
+    $stmt = $conn->prepare('INSERT INTO users (name, email, password) VALUES (?, ?, ?)');
+    $stmt->bind_param('sss', $name, $email, $password);
+
+    if (!$stmt->execute()) {
+        if ($conn->errno === 1062) {
+            http_response_code(409);
+            echo json_encode(['error' => 'Пользователь с таким email уже существует'], JSON_UNESCAPED_UNICODE);
+            exit;
         }
-        break;
+        http_response_code(500);
+        echo json_encode(['error' => 'Ошибка создания пользователя'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
-    case 'POST':
-        // Создание нового пользователя
-        if (!isset($input['name'], $input['email'], $input['password'])) {
-            http_response_code(400);
-            echo json_encode(["error" => "Необходимо указать поля: name, email, password"]);
-            break;
-        }
-
-        $stmt = $pdo->prepare('INSERT INTO users (name, email, password) VALUES (?, ?, ?)');
-        try {
-            $stmt->execute([$input['name'], $input['email'], $input['password']]);
-            http_response_code(201); // 201 Created
-            echo json_encode(["message" => "Пользователь успешно создан", "id" => $pdo->lastInsertId()]);
-        } catch (PDOException $e) {
-            http_response_code(409); // 409 Conflict (например, если email уже занят)
-            echo json_encode(["error" => "Ошибка создания: " . $e->getMessage()]);
-        }
-        break;
-
-    case 'PUT':
-        // Обновление данных пользователя
-        if (isset($_GET['id'])) {
-            if (!isset($input['name'], $input['email'], $input['password'])) {
-                http_response_code(400);
-                echo json_encode(["error" => "Необходимо указать поля: name, email, password"]);
-                break;
-            }
-            $stmt = $pdo->prepare('UPDATE users SET name = ?, email = ?, password = ? WHERE id = ?');
-            $stmt->execute([$input['name'], $input['email'], $input['password'], $_GET['id']]);
-            echo json_encode(["message" => "Данные пользователя обновлены"]);
-        } else {
-            http_response_code(400);
-            echo json_encode(["error" => "Не указан ID пользователя для обновления"]);
-        }
-        break;
-
-    case 'DELETE':
-        // Удаление пользователя
-        if (isset($_GET['id'])) {
-            $stmt = $pdo->prepare('DELETE FROM users WHERE id = ?');
-            $stmt->execute([$_GET['id']]);
-            // Благодаря ON DELETE CASCADE в БД, заказы этого пользователя тоже удалятся
-            echo json_encode(["message" => "Пользователь и связанные данные удалены"]);
-        } else {
-            http_response_code(400);
-            echo json_encode(["error" => "Не указан ID пользователя для удаления"]);
-        }
-        break;
-
-    default:
-        http_response_code(405); // 405 Method Not Allowed
-        echo json_encode(["error" => "Метод не поддерживается"]);
-        break;
+    http_response_code(201);
+    echo json_encode(['id' => $conn->insert_id, 'name' => $name, 'email' => $email], JSON_UNESCAPED_UNICODE);
+    exit;
 }
+#endregion
+
+#region PUT метод
+if ($method === 'PUT') {
+    $data = json_decode(file_get_contents('php://input'), true);
+
+    if ($id === null) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Укажите ID пользователя'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if (!isset($data['name']) || trim($data['name']) === '' ||
+        !isset($data['email']) || trim($data['email']) === '' ||
+        !isset($data['password']) || trim($data['password']) === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Не указаны name, email или password'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $name = trim($data['name']);
+    $email = trim($data['email']);
+    $password = trim($data['password']);
+
+    $stmt = $conn->prepare('UPDATE users SET name = ?, email = ?, password = ? WHERE id = ?');
+    $stmt->bind_param('sssi', $name, $email, $password, $id);
+    $stmt->execute();
+
+    if ($stmt->affected_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Пользователь не найден или данные не изменились'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    echo json_encode(['id' => $id, 'name' => $name, 'email' => $email], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+#endregion
+
+#region DELETE метод
+if ($method === 'DELETE') {
+    if ($id === null) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Укажите ID пользователя'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $stmt = $conn->prepare('DELETE FROM users WHERE id = ?');
+    $stmt->bind_param('i', $id);
+    $stmt->execute();
+
+    if ($stmt->affected_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Пользователь не найден'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    echo json_encode(['message' => 'Пользователь и связанные данные удалены', 'id' => $id], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+#endregion
+
+http_response_code(405);
+echo json_encode(['error' => 'Метод не поддерживается'], JSON_UNESCAPED_UNICODE);

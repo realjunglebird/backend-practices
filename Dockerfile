@@ -1,7 +1,6 @@
 FROM php:8.4-apache
 
-# Установка расширения для работы с MySQL из PHP
-RUN docker-php-ext-install mysqli pdo pdo_mysql
+RUN docker-php-ext-install mysqli
 
 # Копирование файлов сайта в корень веб-сервера
 COPY index.php /var/www/html/index.php
